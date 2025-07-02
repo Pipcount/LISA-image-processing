@@ -266,7 +266,7 @@ def get_fibers_difference_of_gaussians(image):
 def preprocess_image(image):
     steps = {"Original Image": image.copy()}
 
-    filtered = filters.gaussian(image, sigma=10)
+    filtered = difference_of_gaussians(image, low_sigma=0, high_sigma=1)
     steps["1. Gaussian Filter"] = filtered
 
     contrasted = filtered - image
