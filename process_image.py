@@ -6,8 +6,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 from skimage import filters, io, measure, morphology
-from skimage.filters import rank
-import scipy.ndimage as ndimage
+from skimage.filters import frangi, difference_of_gaussians
 
 
 # Load the image
@@ -161,32 +160,23 @@ def simple_fiber_detection(image):
     )
     steps["3. Remove Small Objects"] = binary_fibers.copy()
 
-    binary_fibers = morphology.opening(binary_fibers, morphology.disk(3))
-    steps["4. Morphological Opening"] = binary_fibers.copy()
+    # Big closing to remove noise
+    binary_fibers = morphology.closing(binary_fibers, morphology.disk(5))
+    steps["4. Morphological Closing"] = binary_fibers.copy()
 
-    # Use area and aspect ratio to distinguish fibers from noise
+    binary_fibers = ~binary_fibers
+
+    # Label and remove small components
     labeled = measure.label(binary_fibers)
-    steps["5. Labeled Image"] = labeled
-
     regions = measure.regionprops(labeled)
-
-    cleaned = np.zeros_like(binary_fibers)
-
+    final = np.zeros_like(binary_fibers)
+    min_area = 10000
     for region in regions:
-        # Fiber criteria: minimum area and elongated shape
-        area = region.area
-        bbox = region.bbox
-        height = bbox[2] - bbox[0]
-        width = bbox[3] - bbox[1]
-        aspect_ratio = max(height, width) / max(min(height, width), 1)
+        if region.area >= min_area:
+            final[labeled == region.label] = 255
 
-        # Keep regions that are either:
-        # - Large enough (likely fiber bundles)
-        # - Elongated (likely individual fibers)
-        if area > 1000 or (area > 200 and aspect_ratio > 2):
-            cleaned[labeled == region.label] = True
-
-    steps["6. Cleaned Fibers"] = cleaned
+    final = morphology.remove_small_objects(final, min_size=min_area)
+    steps["5. Final Result"] = final.copy()
 
     # Plot all steps
     fig, axes = plt.subplots(2, 4, figsize=(20, 10))
@@ -203,15 +193,112 @@ def simple_fiber_detection(image):
     plt.tight_layout()
     plt.show()
 
-    return cleaned
+    return binary_fibers
+
+
+def get_fibers_frangi(image):
+    # Store intermediate steps for plotting
+    steps = {"Original Image": image.copy()}
+
+    # Frangi filter to detect long fibers
+    fibers = frangi(image, range(1, 5, 1), alpha=2.0, beta=0.2)
+    steps["1. Frangi Filter"] = fibers.copy()
+
+    # Plot all steps
+    fig, axes = plt.subplots(2, 4, figsize=(20, 10))
+    axes = axes.ravel()
+
+    for i, (title, img) in enumerate(steps.items()):
+        axes[i].imshow(img, cmap="gray")
+        axes[i].set_title(title)
+        axes[i].axis("off")
+
+    for i in range(len(steps), len(axes)):
+        axes[i].axis("off")
+
+    plt.tight_layout()
+    plt.show()
+
+    return fibers
+
+
+def get_fibers_difference_of_gaussians(image):
+    # Store intermediate steps for plotting
+    steps = {"Original Image": image.copy()}
+
+    # Difference of Gaussians filter to detect long fibers
+    fibers = difference_of_gaussians(image, low_sigma=1, high_sigma=100)
+
+    # Normalize the image to the range 0-255 and convert to uint8
+    fibers_normalized = (fibers - fibers.min()) / (fibers.max() - fibers.min()) * 255
+    fibers = fibers_normalized.astype(np.uint8)
+    steps["1. Difference of Gaussians Filter"] = fibers.copy()
+
+    # fibers - image
+    fibers = fibers - image
+    steps["2. Subtract Original Image"] = fibers.copy()
+
+    # Threshold the image
+    thresh = filters.threshold_otsu(fibers)
+    binary_fibers = fibers < thresh  # Fibers are darker
+    balls = image < 1
+    balls_2 = image > 254
+    binary_fibers ^= balls
+    binary_fibers ^= balls_2
+    binary_fibers = ~binary_fibers
+    steps["3. Threshold"] = binary_fibers.copy()
+
+    # Plot all steps
+    fig, axes = plt.subplots(2, 4, figsize=(20, 10))
+    axes = axes.ravel()
+    for i, (title, img) in enumerate(steps.items()):
+        axes[i].imshow(img, cmap="gray")
+        axes[i].set_title(title)
+        axes[i].axis("off")
+    for i in range(len(steps), len(axes)):
+        axes[i].axis("off")
+    plt.tight_layout()
+    plt.show()
+
+    return binary_fibers
+
+
+def preprocess_image(image):
+    steps = {"Original Image": image.copy()}
+
+    filtered = filters.gaussian(image, sigma=10)
+    steps["1. Gaussian Filter"] = filtered
+
+    contrasted = filtered - image
+    steps["2. Image - Contrasted"] = contrasted.copy()
+
+    # Plot all steps
+    fig, axes = plt.subplots(2, 4, figsize=(20, 10))
+    axes = axes.ravel()
+
+    for i, (title, img) in enumerate(steps.items()):
+        axes[i].imshow(img, cmap="gray")
+        axes[i].set_title(title)
+        axes[i].axis("off")
+
+    for i in range(len(steps), len(axes)):
+        axes[i].axis("off")
+
+    plt.tight_layout()
+    plt.show()
+
+    return filtered
 
 
 if __name__ == "__main__":
-    for i in range(10):
+    for i in range(0, 10):
         image = load_image(i)
         # plt.imshow(image, cmap="gray")
         # plt.show()
         # get_histogram(image)
         # centers = get_balls(image.copy())
-        fibers = get_fibers(image.copy())
-        fibers = simple_fiber_detection(image.copy())
+        filtered = preprocess_image(image.copy())
+        # fibers = get_fibers(image.copy())
+        # fibers = simple_fiber_detection(image.copy())
+        # fibers = get_fibers_frangi(image.copy())
+        # fibers = get_fibers_difference_of_gaussians(image.copy())
