@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from skimage import filters, io, measure, morphology
 from skimage.filters import frangi, difference_of_gaussians
+from skimage.morphology import disk
+from skimage.exposure import equalize_adapthist, rescale_intensity
 
 
 # Load the image
@@ -201,7 +203,7 @@ def get_fibers_frangi(image):
     steps = {"Original Image": image.copy()}
 
     # Frangi filter to detect long fibers
-    fibers = frangi(image, range(1, 5, 1), alpha=2.0, beta=0.2)
+    fibers = frangi(image)
     steps["1. Frangi Filter"] = fibers.copy()
 
     # Plot all steps
@@ -227,16 +229,16 @@ def get_fibers_difference_of_gaussians(image):
     steps = {"Original Image": image.copy()}
 
     # Difference of Gaussians filter to detect long fibers
-    fibers = difference_of_gaussians(image, low_sigma=1, high_sigma=100)
+    fibers = difference_of_gaussians(image, low_sigma=0, high_sigma=100)
 
     # Normalize the image to the range 0-255 and convert to uint8
     fibers_normalized = (fibers - fibers.min()) / (fibers.max() - fibers.min()) * 255
     fibers = fibers_normalized.astype(np.uint8)
     steps["1. Difference of Gaussians Filter"] = fibers.copy()
 
-    # fibers - image
-    fibers = fibers - image
-    steps["2. Subtract Original Image"] = fibers.copy()
+    # # fibers - image
+    # fibers = fibers - image
+    # steps["2. Subtract Original Image"] = fibers.copy()
 
     # Threshold the image
     thresh = filters.threshold_otsu(fibers)
@@ -266,11 +268,44 @@ def get_fibers_difference_of_gaussians(image):
 def preprocess_image(image):
     steps = {"Original Image": image.copy()}
 
-    filtered = difference_of_gaussians(image, low_sigma=0, high_sigma=1)
-    steps["1. Gaussian Filter"] = filtered
+    # reversed = 255 - image
+    # steps["1. Reversed Image"] = reversed.copy()
 
-    contrasted = filtered - image
-    steps["2. Image - Contrasted"] = contrasted.copy()
+    filtered = filters.gaussian(image, sigma=1)
+    steps["1. Gaussian Filter"] = filtered
+    # filtered = filters.median(image, morphology.disk(3))
+    # steps["2. Median Filter"] = filtered
+
+    # Autolevel
+    p2, p98 = np.percentile(filtered, [2, 98])
+    autoleveled = rescale_intensity(filtered, in_range=(p2, p98))
+    steps["2. Autolevel"] = autoleveled.copy()
+
+    autoleveled = np.uint8(autoleveled * 255)
+    equalized = equalize_adapthist(autoleveled, clip_limit=1, kernel_size=400)
+    equalized = np.uint8(equalized * 255)
+    steps["3. Equalize Adaptive"] = equalized.copy()
+
+    # # Threshold the image
+    # thresh = filters.threshold_otsu(autoleveled)
+    # binary_fibers = autoleveled < thresh
+    # balls = image < 1
+    # balls_2 = image > 254
+    # binary_fibers ^= balls
+    # binary_fibers ^= balls_2
+    # steps["5. Threshold"] = binary_fibers.copy()
+    #
+    # # Close the image
+    # kernel = morphology.disk(3)
+    # closed = morphology.closing(binary_fibers, kernel)
+    # steps["6. Closing"] = closed.copy()
+    #
+    # # remove small objects
+    # closed = morphology.remove_small_objects(closed, min_size=16384)
+    # steps["7. Remove Small Objects"] = closed.copy()
+    #
+    # labeled = measure.label(closed)
+    # steps["7. Labeled"] = labeled.copy()
 
     # Plot all steps
     fig, axes = plt.subplots(2, 4, figsize=(20, 10))
@@ -287,7 +322,38 @@ def preprocess_image(image):
     plt.tight_layout()
     plt.show()
 
-    return filtered
+    return equalized
+
+
+def gradient(image):
+    # Store intermediate steps for plotting
+    steps = {"Original Image": image.copy()}
+    # Gradient
+    grad = filters.rank.gradient(image, disk(1))
+    steps["1. Gradient"] = grad.copy()
+
+    # Threshold the image
+    thresh = filters.threshold_otsu(grad)
+    binary_fibers = grad < thresh  # Fibers are darker
+    balls = image < 5
+    balls_2 = image > 254
+    binary_fibers ^= balls
+    binary_fibers ^= balls_2
+    steps["2. Otsu Threshold"] = binary_fibers.copy()
+
+    # Plot all steps
+    fig, axes = plt.subplots(2, 4, figsize=(20, 10))
+    axes = axes.ravel()
+    for i, (title, img) in enumerate(steps.items()):
+        axes[i].imshow(img, cmap="gray")
+        axes[i].set_title(title)
+        axes[i].axis("off")
+    for i in range(len(steps), len(axes)):
+        axes[i].axis("off")
+
+    plt.tight_layout()
+    plt.show()
+    return grad
 
 
 if __name__ == "__main__":
@@ -298,7 +364,8 @@ if __name__ == "__main__":
         # get_histogram(image)
         # centers = get_balls(image.copy())
         filtered = preprocess_image(image.copy())
-        # fibers = get_fibers(image.copy())
-        # fibers = simple_fiber_detection(image.copy())
-        # fibers = get_fibers_frangi(image.copy())
-        # fibers = get_fibers_difference_of_gaussians(image.copy())
+        grad = gradient(filtered.copy())
+        # fibers = get_fibers(filtered.copy())
+        # fibers = simple_fiber_detection(filtered.copy())
+        # fibers = get_fibers_frangi(filtered.copy())
+        # fibers = get_fibers_difference_of_gaussians(filtered.copy())
